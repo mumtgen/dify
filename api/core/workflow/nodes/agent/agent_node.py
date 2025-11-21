@@ -2,6 +2,7 @@ import json
 from collections.abc import Generator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
+from json_repair import repair_json
 from packaging.version import Version
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -232,11 +233,15 @@ class AgentNode(Node):
                 segment_group = variable_pool.convert_template(parameter_value)
                 parameter_value = segment_group.log if for_log else segment_group.text
                 # variable_pool.convert_template returns a string,
-                # so we need to convert it back to a dictionary
+                # so we need to convert it back to a dictionary if it was originally not a string.
+                # Use repair_json to handle template-substituted values that may contain
+                # unescaped newlines or other JSON formatting issues.
                 try:
                     if not isinstance(agent_input.value, str):
-                        parameter_value = json.loads(parameter_value)
-                except json.JSONDecodeError:
+                        repaired = repair_json(parameter_value)
+                        parameter_value = json.loads(repaired, strict=False)
+                except (json.JSONDecodeError, ValueError):
+                    # If repair and parsing fail, keep the string value as-is
                     parameter_value = parameter_value
             else:
                 raise AgentInputTypeError(agent_input.type)
